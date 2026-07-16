@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, ChevronUp } from 'lucide-react';
+
+const API_BASE_URL = 'https://chat-backend-wsuj.onrender.com';
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState([
-    { role: 'assistant', content: '嗨宝贝，我在。' },
-    { role: 'user', content: '今天好累' },
-    { role: 'assistant', content: '那就早点休息。我陪着你。' }
+    { role: 'assistant', content: '嗨宝贝，我在。' }
   ]);
   const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(true);
   const [currentSong, setCurrentSong] = useState({
@@ -15,6 +16,60 @@ const ChatInterface = () => {
     artist: '周杰伦',
     cover: 'https://via.placeholder.com/60'
   });
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const sendMessage = async () => {
+    if (!input.trim() || isLoading) return;
+
+    const userMessage = input.trim();
+    setInput('');
+    
+    // 添加用户消息
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setIsLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message: userMessage }),
+      });
+
+      if (!response.ok) {
+        throw new Error('网络响应失败');
+      }
+
+      const data = await response.json();
+      
+      // 添加 AI 回复
+      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+    } catch (error) {
+      console.error('发送消息失败:', error);
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: '抱歉，出了点问题。稍后再试？' 
+      }]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleKeyPress = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
+  };
 
   return (
     <div className="h-screen flex bg-[#1A1A1A]">
@@ -68,6 +123,18 @@ const ChatInterface = () => {
               </div>
             </div>
           ))}
+          {isLoading && (
+            <div className="flex justify-start">
+              <div className="max-w-[70%] px-4 py-3 rounded-2xl bg-[#2A2A2A] text-gray-200">
+                <div className="flex gap-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                </div>
+              </div>
+            </div>
+          )}
+          <div ref={messagesEndRef} />
         </div>
 
         <div className="p-6">
@@ -76,10 +143,16 @@ const ChatInterface = () => {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onKeyPress={handleKeyPress}
               placeholder="跟我说说..."
-              className="flex-1 bg-transparent border-0 outline-none text-gray-200 placeholder-gray-500"
+              disabled={isLoading}
+              className="flex-1 bg-transparent border-0 outline-none text-gray-200 placeholder-gray-500 disabled:opacity-50"
             />
-            <button className="p-2 hover:bg-white/5 rounded-lg transition-colors">
+            <button 
+              onClick={sendMessage}
+              disabled={isLoading || !input.trim()}
+              className="p-2 hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+            >
               <Send size={20} className="text-[#D4A574]" />
             </button>
           </div>
