@@ -1,13 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, ChevronUp, X, RefreshCw } from 'lucide-react';
+import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, ChevronUp, X, RefreshCw, MoreVertical, Trash2, Edit2 } from 'lucide-react';
 
 const API_BASE_URL = 'https://chat-backend-wsuj.onrender.com';
 
 const ChatInterface = () => {
+  const [sessions, setSessions] = useState([]);
   const [currentSessionId, setCurrentSessionId] = useState(null);
-  const [messages, setMessages] = useState([
-    { role: 'assistant', content: '嗨宝贝，我在。' }
-  ]);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -17,6 +16,8 @@ const ChatInterface = () => {
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [availableModels, setAvailableModels] = useState([]);
   const [testResult, setTestResult] = useState(null);
+  const [editingSessionId, setEditingSessionId] = useState(null);
+  const [editingName, setEditingName] = useState('');
   const [currentSong, setCurrentSong] = useState({
     name: '夜的第七章',
     artist: '周杰伦',
@@ -42,10 +43,43 @@ const ChatInterface = () => {
     scrollToBottom();
   }, [messages]);
 
-  // 组件挂载时创建会话
+  // 组件挂载时加载会话列表
   useEffect(() => {
-    createNewSession();
+    loadSessions();
   }, []);
+
+  const loadSessions = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions`);
+      if (!response.ok) throw new Error('加载会话失败');
+      
+      const data = await response.json();
+      setSessions(data);
+      
+      // 如果有会话，自动选中第一个
+      if (data.length > 0 && !currentSessionId) {
+        switchSession(data[0].id);
+      }
+    } catch (error) {
+      console.error('加载会话失败:', error);
+    }
+  };
+
+  const switchSession = async (sessionId) => {
+    setCurrentSessionId(sessionId);
+    
+    // 加载该会话的消息
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/messages`);
+      if (!response.ok) throw new Error('加载消息失败');
+      
+      const data = await response.json();
+      setMessages(data);
+    } catch (error) {
+      console.error('加载消息失败:', error);
+      setMessages([]);
+    }
+  };
 
   const createNewSession = async () => {
     try {
@@ -57,15 +91,60 @@ const ChatInterface = () => {
         body: JSON.stringify({ name: '新对话' }),
       });
 
-      if (!response.ok) {
-        throw new Error('创建会话失败');
-      }
+      if (!response.ok) throw new Error('创建会话失败');
 
       const session = await response.json();
+      setSessions(prev => [session, ...prev]);
       setCurrentSessionId(session.id);
-      setMessages([{ role: 'assistant', content: '嗨宝贝，我在。' }]);
+      setMessages([]);
     } catch (error) {
       console.error('创建会话失败:', error);
+    }
+  };
+
+  const renameSession = async (sessionId, newName) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: newName }),
+      });
+
+      if (!response.ok) throw new Error('重命名失败');
+
+      const updated = await response.json();
+      setSessions(prev => prev.map(s => s.id === sessionId ? updated : s));
+      setEditingSessionId(null);
+    } catch (error) {
+      console.error('重命名失败:', error);
+    }
+  };
+
+  const deleteSession = async (sessionId) => {
+    if (!confirm('确定删除这个会话吗？')) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) throw new Error('删除失败');
+
+      setSessions(prev => prev.filter(s => s.id !== sessionId));
+      
+      if (currentSessionId === sessionId) {
+        const remaining = sessions.filter(s => s.id !== sessionId);
+        if (remaining.length > 0) {
+          switchSession(remaining[0].id);
+        } else {
+          setCurrentSessionId(null);
+          setMessages([]);
+        }
+      }
+    } catch (error) {
+      console.error('删除失败:', error);
     }
   };
 
@@ -85,9 +164,7 @@ const ChatInterface = () => {
         }
       });
 
-      if (!response.ok) {
-        throw new Error('获取模型列表失败');
-      }
+      if (!response.ok) throw new Error('获取模型列表失败');
 
       const data = await response.json();
       const models = data.data.map(m => m.id);
@@ -117,9 +194,7 @@ const ChatInterface = () => {
         }
       });
 
-      if (!response.ok) {
-        throw new Error('连接失败');
-      }
+      if (!response.ok) throw new Error('连接失败');
 
       setTestResult({ success: true, message: '连接成功！API 配置正确' });
     } catch (error) {
@@ -168,9 +243,7 @@ const ChatInterface = () => {
         }),
       });
 
-      if (!response.ok) {
-        throw new Error('网络响应失败');
-      }
+      if (!response.ok) throw new Error('网络响应失败');
 
       const data = await response.json();
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
@@ -206,9 +279,62 @@ const ChatInterface = () => {
         </div>
         
         <div className="flex-1 overflow-y-auto p-2">
-          <div className="px-3 py-2 rounded-lg bg-white/5 mb-1 cursor-pointer text-gray-300">
-            当前对话
-          </div>
+          {sessions.map(session => (
+            <div
+              key={session.id}
+              className={`group px-3 py-2 rounded-lg mb-1 cursor-pointer transition-colors ${
+                currentSessionId === session.id
+                  ? 'bg-white/10 text-gray-200'
+                  : 'text-gray-400 hover:bg-white/5'
+              }`}
+            >
+              {editingSessionId === session.id ? (
+                <input
+                  type="text"
+                  value={editingName}
+                  onChange={(e) => setEditingName(e.target.value)}
+                  onBlur={() => renameSession(session.id, editingName)}
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      renameSession(session.id, editingName);
+                    }
+                  }}
+                  className="w-full bg-transparent border-0 outline-none text-sm"
+                  autoFocus
+                />
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div
+                    onClick={() => switchSession(session.id)}
+                    className="flex-1 truncate text-sm"
+                  >
+                    {session.name}
+                  </div>
+                  <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingSessionId(session.id);
+                        setEditingName(session.name);
+                      }}
+                      className="p-1 hover:bg-white/10 rounded"
+                    >
+                      <Edit2 size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        deleteSession(session.id);
+                      }}
+                      className="p-1 hover:bg-white/10 rounded"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          ))}
         </div>
 
         <div className="p-4 border-t border-white/5">
@@ -224,7 +350,9 @@ const ChatInterface = () => {
 
       <div className="flex-1 flex flex-col relative">
         <div className="h-16 flex items-center justify-between px-6 bg-[#2A2A2A] border-b border-white/5">
-          <div className="text-gray-200">Claude</div>
+          <div className="text-gray-200">
+            {sessions.find(s => s.id === currentSessionId)?.name || 'Claude'}
+          </div>
           <div className="text-sm text-gray-400">
             {apiConfig.model || '未配置'}
           </div>
@@ -264,12 +392,12 @@ const ChatInterface = () => {
               onChange={(e) => setInput(e.target.value)}
               onKeyPress={handleKeyPress}
               placeholder="跟我说说..."
-              disabled={isLoading}
+              disabled={isLoading || !currentSessionId}
               className="flex-1 bg-transparent border-0 outline-none text-gray-200 placeholder-gray-500 disabled:opacity-50"
             />
             <button 
               onClick={sendMessage}
-              disabled={isLoading || !input.trim()}
+              disabled={isLoading || !input.trim() || !currentSessionId}
               className="p-2 hover:bg-white/5 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Send size={20} className="text-[#D4A574]" />
