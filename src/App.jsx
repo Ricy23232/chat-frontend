@@ -4,6 +4,7 @@ import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, Che
 const API_BASE_URL = 'https://chat-backend-wsuj.onrender.com';
 
 const ChatInterface = () => {
+  const [currentSessionId, setCurrentSessionId] = useState(null);
   const [messages, setMessages] = useState([
     { role: 'assistant', content: '嗨宝贝，我在。' }
   ]);
@@ -40,6 +41,33 @@ const ChatInterface = () => {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // 组件挂载时创建会话
+  useEffect(() => {
+    createNewSession();
+  }, []);
+
+  const createNewSession = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: '新对话' }),
+      });
+
+      if (!response.ok) {
+        throw new Error('创建会话失败');
+      }
+
+      const session = await response.json();
+      setCurrentSessionId(session.id);
+      setMessages([{ role: 'assistant', content: '嗨宝贝，我在。' }]);
+    } catch (error) {
+      console.error('创建会话失败:', error);
+    }
+  };
 
   const fetchModels = async () => {
     if (!apiConfig.baseUrl || !apiConfig.apiKey) {
@@ -114,7 +142,7 @@ const ChatInterface = () => {
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || isLoading) return;
+    if (!input.trim() || isLoading || !currentSessionId) return;
     
     if (!apiConfig.baseUrl || !apiConfig.apiKey) {
       alert('请先在设置中配置 API');
@@ -129,7 +157,7 @@ const ChatInterface = () => {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/chat`, {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionId}/chat`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -168,7 +196,10 @@ const ChatInterface = () => {
     <div className="h-screen flex bg-[#1A1A1A]">
       <div className="w-64 bg-[#2A2A2A] flex flex-col border-r border-white/5">
         <div className="p-4 border-b border-white/5">
-          <button className="w-full flex items-center gap-2 px-4 py-2 bg-[#D4A574] text-white rounded-lg hover:bg-[#C39564] transition-colors">
+          <button 
+            onClick={createNewSession}
+            className="w-full flex items-center gap-2 px-4 py-2 bg-[#D4A574] text-white rounded-lg hover:bg-[#C39564] transition-colors"
+          >
             <Plus size={18} />
             <span>新对话</span>
           </button>
@@ -176,7 +207,7 @@ const ChatInterface = () => {
         
         <div className="flex-1 overflow-y-auto p-2">
           <div className="px-3 py-2 rounded-lg bg-white/5 mb-1 cursor-pointer text-gray-300">
-            今天的对话
+            当前对话
           </div>
         </div>
 
