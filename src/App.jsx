@@ -1,9 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Plus, Settings, Menu, X, RefreshCw, Edit2, Trash2, Brain, Grid, Upload, Trash, Edit } from 'lucide-react';
+import { Send, Plus, Settings, Menu, X, RefreshCw, Edit2, Trash2, Brain, Grid, Upload, Trash, Edit, MessageCircle } from 'lucide-react';
 
 const API_BASE_URL = 'https://chat-backend-wsuj.onrender.com';
 
-// 主题配色
 const themes = {
   dark: {
     name: '黑金配色',
@@ -41,6 +40,7 @@ const ChatInterface = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showApps, setShowApps] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
@@ -73,6 +73,7 @@ const ChatInterface = () => {
   const charAvatarInputRef = useRef(null);
   const userAvatarInputRef = useRef(null);
   const backgroundImageInputRef = useRef(null);
+  const typingTimeoutRef = useRef(null);
 
   const currentTheme = themes[theme];
 
@@ -508,6 +509,21 @@ const ChatInterface = () => {
     setTestResult(null);
   };
 
+  const handleInputChange = (e) => {
+    setInput(e.target.value);
+    setIsTyping(e.target.value.length > 0);
+    
+    // 清除之前的定时器
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    // 设置新的定时器，2秒后认为停止输入
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+    }, 2000);
+  };
+
   const sendMessage = async () => {
     if (!input.trim() || isLoading || !currentSessionId) return;
     
@@ -519,8 +535,44 @@ const ChatInterface = () => {
 
     const userMessage = input.trim();
     setInput('');
+    setIsTyping(false);
+    
+    // 清除定时器
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
     
     setMessages(prev => [...prev, { role: 'user', content: userMessage, created_at: new Date().toISOString() }]);
+    
+    const session = getCurrentSession();
+    const replyMode = session?.reply_mode || 'auto';
+    
+    // 手动回复模式：只发送消息，不自动回复
+    if (replyMode === 'manual') {
+      return;
+    }
+    
+    // 自动回复（不打断）模式：等待用户停止输入
+    if (replyMode === 'auto_no_interrupt') {
+      const waitForTypingStop = () => {
+        return new Promise((resolve) => {
+          const checkInterval = setInterval(() => {
+            if (!isTyping) {
+              clearInterval(checkInterval);
+              resolve();
+            }
+          }, 500);
+        });
+      };
+      
+      await waitForTypingStop();
+    }
+    
+    // 自动回复（可打断）模式：立即回复
+    triggerAIReply(userMessage);
+  };
+
+  const triggerAIReply = async (messageContent) => {
     setIsLoading(true);
 
     try {
@@ -530,7 +582,7 @@ const ChatInterface = () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ 
-          message: userMessage,
+          message: messageContent,
           apiConfig: apiConfig
         }),
       });
@@ -554,6 +606,37 @@ const ChatInterface = () => {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const replyToMessages = async () => {
+    if (isLoading || !currentSessionId) return;
+    
+    if (!apiConfig.baseUrl || !apiConfig.apiKey) {
+      alert('请先在设置中配置 API');
+      setShowSettings(true);
+      return;
+    }
+
+    // 找到最后一条 AI 消息的索引
+    let lastAIIndex = -1;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') {
+        lastAIIndex = i;
+        break;
+      }
+    }
+
+    // 获取最后一条 AI 消息之后的所有用户消息
+    const userMessages = messages.slice(lastAIIndex + 1).filter(m => m.role === 'user');
+    
+    if (userMessages.length === 0) {
+      alert('没有需要回复的消息');
+      return;
+    }
+
+    // 使用最后一条用户消息作为触发
+    const lastUserMessage = userMessages[userMessages.length - 1].content;
+    triggerAIReply(lastUserMessage);
   };
 
   const handleKeyPress = (e) => {
@@ -846,7 +929,7 @@ const ChatInterface = () => {
             <input
               type="text"
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              onChange={handleInputChange}
               onKeyPress={handleKeyPress}
               placeholder="跟我说说..."
               disabled={isLoading || !currentSessionId}
@@ -856,6 +939,16 @@ const ChatInterface = () => {
                 caretColor: currentTheme.accent
               }}
             />
+            {getCurrentSession()?.reply_mode === 'manual' && (
+              <button 
+                onClick={replyToMessages}
+                disabled={isLoading || !currentSessionId}
+                className="p-2 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed hover:bg-white/5"
+                title="回复"
+              >
+                <MessageCircle size={20} style={{ color: currentTheme.accent }} />
+              </button>
+            )}
             <button 
               onClick={sendMessage}
               disabled={isLoading || !input.trim() || !currentSessionId}
@@ -1061,6 +1154,58 @@ const ChatInterface = () => {
                       color: currentTheme.text
                     }}
                   />
+                </div>
+              </div>
+
+              {/* 角色回复模式 */}
+              <div>
+                <label className="block text-sm mb-3" style={{ color: currentTheme.text }}>角色回复模式</label>
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 cursor-pointer p-3 rounded-lg transition-colors hover:bg-white/5">
+                    <input
+                      type="radio"
+                      name="reply_mode"
+                      value="manual"
+                      checked={currentSessionConfig.reply_mode === 'manual'}
+                      onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, reply_mode: e.target.value})}
+                      className="w-4 h-4"
+                      style={{ accentColor: currentTheme.accent }}
+                    />
+                    <div>
+                      <div className="text-sm" style={{ color: currentTheme.text }}>手动回复</div>
+                      <div className="text-xs" style={{ color: currentTheme.textSecondary }}>用户发消息后不会自动回复，需点击回复按钮</div>
+                    </div>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer p-3 rounded-lg transition-colors hover:bg-white/5">
+                    <input
+                      type="radio"
+                      name="reply_mode"
+                      value="auto"
+                      checked={!currentSessionConfig.reply_mode || currentSessionConfig.reply_mode === 'auto'}
+                      onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, reply_mode: e.target.value})}
+                      className="w-4 h-4"
+                      style={{ accentColor: currentTheme.accent }}
+                    />
+                    <div>
+                      <div className="text-sm" style={{ color: currentTheme.text }}>自动回复（可打断）</div>
+                      <div className="text-xs" style={{ color: currentTheme.textSecondary }}>用户发消息后立即自动回复，即使用户正在输入也会回复</div>
+                    </div>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer p-3 rounded-lg transition-colors hover:bg-white/5">
+                    <input
+                      type="radio"
+                      name="reply_mode"
+                      value="auto_no_interrupt"
+                      checked={currentSessionConfig.reply_mode === 'auto_no_interrupt'}
+                      onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, reply_mode: e.target.value})}
+                      className="w-4 h-4"
+                      style={{ accentColor: currentTheme.accent }}
+                    />
+                    <div>
+                      <div className="text-sm" style={{ color: currentTheme.text }}>自动回复（不打断）</div>
+                      <div className="text-xs" style={{ color: currentTheme.textSecondary }}>用户发消息后会自动回复，但会等待用户停止输入</div>
+                    </div>
+                  </label>
                 </div>
               </div>
 
