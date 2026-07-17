@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Plus, Settings, Menu, X, RefreshCw, Edit2, Trash2, Brain, Grid } from 'lucide-react';
+import { Send, Plus, Settings, Menu, X, RefreshCw, Edit2, Trash2, Brain, Grid, Upload, Trash, Edit } from 'lucide-react';
 
 const API_BASE_URL = 'https://chat-backend-wsuj.onrender.com';
 
@@ -12,6 +12,12 @@ const ChatInterface = () => {
   const [showSettings, setShowSettings] = useState(false);
   const [showApps, setShowApps] = useState(false);
   const [showSidebar, setShowSidebar] = useState(true);
+  const [showSessionConfig, setShowSessionConfig] = useState(false);
+  const [currentSessionConfig, setCurrentSessionConfig] = useState(null);
+  const [worldBook, setWorldBook] = useState([]);
+  const [memorySummaries, setMemorySummaries] = useState([]);
+  const [editingWorldBook, setEditingWorldBook] = useState(null);
+  const [editingSummary, setEditingSummary] = useState(null);
   const [settingsTab, setSettingsTab] = useState('api');
   const [isTesting, setIsTesting] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -32,6 +38,8 @@ const ChatInterface = () => {
   });
   
   const messagesEndRef = useRef(null);
+  const charAvatarInputRef = useRef(null);
+  const userAvatarInputRef = useRef(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -44,7 +52,6 @@ const ChatInterface = () => {
   useEffect(() => {
     loadSessions();
     
-    // 响应式处理：小屏幕默认隐藏侧边栏
     const handleResize = () => {
       setShowSidebar(window.innerWidth >= 768);
     };
@@ -63,6 +70,200 @@ const ChatInterface = () => {
     if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
     if (diff < 86400000) return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
     return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const handleImageUpload = (e, type) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      if (type === 'char') {
+        setCurrentSessionConfig({...currentSessionConfig, char_avatar: reader.result});
+      } else {
+        setCurrentSessionConfig({...currentSessionConfig, user_avatar: reader.result});
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const loadSessionConfig = async (sessionId) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`);
+      if (!response.ok) throw new Error('加载会话配置失败');
+      const data = await response.json();
+      setCurrentSessionConfig(data);
+      
+      // 加载世界书
+      const wbResponse = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/worldbook`);
+      if (wbResponse.ok) {
+        const wbData = await wbResponse.json();
+        setWorldBook(wbData);
+      }
+      
+      // 加载记忆总结
+      const msResponse = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/summaries`);
+      if (msResponse.ok) {
+        const msData = await msResponse.json();
+        setMemorySummaries(msData);
+      }
+      
+      setShowSessionConfig(true);
+    } catch (error) {
+      console.error('加载会话配置失败:', error);
+    }
+  };
+
+  const saveSessionConfig = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionConfig.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(currentSessionConfig),
+      });
+
+      if (!response.ok) throw new Error('保存失败');
+      
+      // 更新本地会话列表
+      setSessions(prev => prev.map(s => s.id === currentSessionConfig.id ? {...s, name: currentSessionConfig.name} : s));
+      
+      setShowSessionConfig(false);
+      alert('设置已保存');
+    } catch (error) {
+      console.error('保存会话配置失败:', error);
+      alert('保存失败');
+    }
+  };
+
+  const addWorldBookEntry = async () => {
+    setEditingWorldBook({ name: '', content: '', isNew: true });
+  };
+
+  const saveWorldBookEntry = async (entry) => {
+    try {
+      if (entry.isNew) {
+        const response = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionConfig.id}/worldbook`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ name: entry.name, content: entry.content }),
+        });
+        
+        if (!response.ok) throw new Error('添加失败');
+        const newEntry = await response.json();
+        setWorldBook(prev => [...prev, newEntry]);
+      } else {
+        const response = await fetch(`${API_BASE_URL}/api/worldbook/${entry.id}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ name: entry.name, content: entry.content }),
+        });
+        
+        if (!response.ok) throw new Error('更新失败');
+        const updated = await response.json();
+        setWorldBook(prev => prev.map(e => e.id === entry.id ? updated : e));
+      }
+      
+      setEditingWorldBook(null);
+    } catch (error) {
+      console.error('保存世界书失败:', error);
+      alert('保存失败');
+    }
+  };
+
+  const deleteWorldBookEntry = async (id) => {
+    if (!window.confirm('确定删除这条世界书吗？')) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/worldbook/${id}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) throw new Error('删除失败');
+      setWorldBook(prev => prev.filter(e => e.id !== id));
+    } catch (error) {
+      console.error('删除世界书失败:', error);
+      alert('删除失败');
+    }
+  };
+
+  const saveSummary = async (summary) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/summaries/${summary.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ summary: summary.summary }),
+      });
+      
+      if (!response.ok) throw new Error('更新失败');
+      const updated = await response.json();
+      setMemorySummaries(prev => prev.map(s => s.id === summary.id ? updated : s));
+      setEditingSummary(null);
+    } catch (error) {
+      console.error('更新记忆总结失败:', error);
+      alert('更新失败');
+    }
+  };
+
+  const deleteSummary = async (id) => {
+    if (!window.confirm('确定删除这条记忆总结吗？')) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/summaries/${id}`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) throw new Error('删除失败');
+      setMemorySummaries(prev => prev.filter(s => s.id !== id));
+    } catch (error) {
+      console.error('删除记忆总结失败:', error);
+      alert('删除失败');
+    }
+  };
+
+  const deleteAllSummaries = async () => {
+    if (!window.confirm('确定删除所有记忆总结吗？')) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionConfig.id}/summaries`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) throw new Error('删除失败');
+      setMemorySummaries([]);
+    } catch (error) {
+      console.error('删除所有记忆总结失败:', error);
+      alert('删除失败');
+    }
+  };
+
+  const clearAllMessages = async () => {
+    if (!window.confirm('确定清除所有聊天记录吗？此操作不可恢复！')) return;
+    
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/sessions/${currentSessionConfig.id}/messages`, {
+        method: 'DELETE',
+      });
+      
+      if (!response.ok) throw new Error('清除失败');
+      
+      // 如果当前正在查看这个会话，清空消息列表
+      if (currentSessionId === currentSessionConfig.id) {
+        setMessages([]);
+      }
+      
+      alert('聊天记录已清除');
+    } catch (error) {
+      console.error('清除聊天记录失败:', error);
+      alert('清除失败');
+    }
   };
 
   const loadSystemSettings = async () => {
@@ -115,7 +316,6 @@ const ChatInterface = () => {
   const switchSession = async (sessionId) => {
     setCurrentSessionId(sessionId);
     
-    // 移动端切换会话后自动隐藏侧边栏
     if (window.innerWidth < 768) {
       setShowSidebar(false);
     }
@@ -149,7 +349,6 @@ const ChatInterface = () => {
       setCurrentSessionId(session.id);
       setMessages([]);
       
-      // 移动端创建后自动隐藏侧边栏
       if (window.innerWidth < 768) {
         setShowSidebar(false);
       }
@@ -326,6 +525,10 @@ const ChatInterface = () => {
     }
   };
 
+  const getCurrentSession = () => {
+    return sessions.find(s => s.id === currentSessionId);
+  };
+
   return (
     <div className="h-screen flex bg-[#1A1A1A]">
       {/* 侧边栏 */}
@@ -382,10 +585,21 @@ const ChatInterface = () => {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+                        loadSessionConfig(session.id);
+                      }}
+                      className="p-1 hover:bg-white/10 rounded"
+                      title="会话设置"
+                    >
+                      <Settings size={14} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
                         setEditingSessionId(session.id);
                         setEditingName(session.name);
                       }}
                       className="p-1 hover:bg-white/10 rounded"
+                      title="重命名"
                     >
                       <Edit2 size={14} />
                     </button>
@@ -395,6 +609,7 @@ const ChatInterface = () => {
                         deleteSession(session.id);
                       }}
                       className="p-1 hover:bg-white/10 rounded"
+                      title="删除"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -432,7 +647,7 @@ const ChatInterface = () => {
               <Menu size={20} />
             </button>
             <div className="text-gray-200">
-              {sessions.find(s => s.id === currentSessionId)?.name || 'Claude'}
+              {getCurrentSession()?.char_name || getCurrentSession()?.name || 'Claude'}
             </div>
           </div>
           <div className="flex items-center gap-2">
@@ -449,38 +664,60 @@ const ChatInterface = () => {
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
-          {messages.map((msg, i) => (
-            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`max-w-[85%] md:max-w-[70%] px-4 py-3 rounded-2xl whitespace-pre-wrap text-sm md:text-base ${
-                msg.role === 'user' 
-                  ? 'bg-[#D4A574] text-white' 
-                  : 'bg-[#2A2A2A] text-gray-200'
-              }`}>
-                {msg.content}
-              </div>
-              
-              {msg.reasoning_content && (
-                <div className="max-w-[85%] md:max-w-[70%] mt-2">
-                  <button
-                    onClick={() => setExpandedThinking({...expandedThinking, [i]: !expandedThinking[i]})}
-                    className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
-                  >
-                    <Brain size={14} />
-                    <span>{expandedThinking[i] ? '收起' : '查看'}思考过程</span>
-                  </button>
-                  {expandedThinking[i] && (
-                    <div className="mt-2 px-4 py-3 bg-[#1A1A1A] rounded-lg text-sm text-gray-400 whitespace-pre-wrap">
-                      {msg.reasoning_content}
+          {messages.map((msg, i) => {
+            const session = getCurrentSession();
+            const avatar = msg.role === 'user' ? session?.user_avatar : session?.char_avatar;
+            const name = msg.role === 'user' ? session?.user_name || '我' : session?.char_name || 'Claude';
+            
+            return (
+              <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                <div className={`flex items-start gap-2 max-w-[85%] md:max-w-[70%] ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                  {avatar ? (
+                    <img src={avatar} alt={name} className="w-8 h-8 rounded-full flex-shrink-0" />
+                  ) : (
+                    <div className={`w-8 h-8 rounded-full flex-shrink-0 flex items-center justify-center text-sm ${
+                      msg.role === 'user' ? 'bg-[#D4A574]' : 'bg-[#2A2A2A]'
+                    } text-white`}>
+                      {name.charAt(0)}
                     </div>
                   )}
+                  <div className="flex-1">
+                    <div className={`text-xs mb-1 ${msg.role === 'user' ? 'text-right' : 'text-left'} text-gray-400`}>
+                      {name}
+                    </div>
+                    <div className={`px-4 py-3 rounded-2xl whitespace-pre-wrap text-sm md:text-base ${
+                      msg.role === 'user' 
+                        ? 'bg-[#D4A574] text-white' 
+                        : 'bg-[#2A2A2A] text-gray-200'
+                    }`}>
+                      {msg.content}
+                    </div>
+                  </div>
                 </div>
-              )}
-              
-              <div className="text-xs text-gray-500 mt-1">
-                {formatTime(msg.created_at)}
+                
+                {msg.reasoning_content && (
+                  <div className="max-w-[85%] md:max-w-[70%] mt-2 ml-10">
+                    <button
+                      onClick={() => setExpandedThinking({...expandedThinking, [i]: !expandedThinking[i]})}
+                      className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                    >
+                      <Brain size={14} />
+                      <span>{expandedThinking[i] ? '收起' : '查看'}思考过程</span>
+                    </button>
+                    {expandedThinking[i] && (
+                      <div className="mt-2 px-4 py-3 bg-[#1A1A1A] rounded-lg text-sm text-gray-400 whitespace-pre-wrap">
+                        {msg.reasoning_content}
+                      </div>
+                    )}
+                  </div>
+                )}
+                
+                <div className={`text-xs text-gray-500 mt-1 ${msg.role === 'user' ? 'mr-10' : 'ml-10'}`}>
+                  {formatTime(msg.created_at)}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {isLoading && (
             <div className="flex justify-start">
               <div className="max-w-[85%] md:max-w-[70%] px-4 py-3 rounded-2xl bg-[#2A2A2A] text-gray-200">
@@ -525,6 +762,429 @@ const ChatInterface = () => {
         />
       )}
 
+      {/* 会话配置弹窗 */}
+      {showSessionConfig && currentSessionConfig && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div className="bg-[#2A2A2A] rounded-xl w-full max-w-3xl my-8 border border-white/10">
+            <div className="flex items-center justify-between p-6 border-b border-white/5 sticky top-0 bg-[#2A2A2A] z-10">
+              <h2 className="text-xl text-gray-200">会话设置</h2>
+              <button 
+                onClick={() => setShowSessionConfig(false)}
+                className="p-1 hover:bg-white/5 rounded-lg transition-colors"
+              >
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+              {/* 头像设置 */}
+              <div>
+                <label className="block text-sm text-gray-300 mb-3">头像设置</label>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-xs text-gray-400 mb-2">CHAR（AI头像）</div>
+                    <div className="flex flex-col items-center gap-2">
+                      {currentSessionConfig.char_avatar ? (
+                        <img src={currentSessionConfig.char_avatar} alt="CHAR" className="w-20 h-20 rounded-full" />
+                      ) : (
+                        <div className="w-20 h-20 rounded-full bg-[#1A1A1A] flex items-center justify-center text-gray-500">
+                          CHAR
+                        </div>
+                      )}
+                      <input
+                        ref={charAvatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e, 'char')}
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => charAvatarInputRef.current?.click()}
+                        className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded text-sm text-gray-300 transition-colors"
+                      >
+                        上传头像
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-400 mb-2">USER（用户头像）</div>
+                    <div className="flex flex-col items-center gap-2">
+                      {currentSessionConfig.user_avatar ? (
+                        <img src={currentSessionConfig.user_avatar} alt="USER" className="w-20 h-20 rounded-full" />
+                      ) : (
+                        <div className="w-20 h-20 rounded-full bg-[#1A1A1A] flex items-center justify-center text-gray-500">
+                          USER
+                        </div>
+                      )}
+                      <input
+                        ref={userAvatarInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={(e) => handleImageUpload(e, 'user')}
+                        className="hidden"
+                      />
+                      <button
+                        onClick={() => userAvatarInputRef.current?.click()}
+                        className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded text-sm text-gray-300 transition-colors"
+                      >
+                        上传头像
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 昵称设置 */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">CHAR NAME（AI昵称）</label>
+                  <input
+                    type="text"
+                    value={currentSessionConfig.char_name || ''}
+                    onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, char_name: e.target.value})}
+                    placeholder="Claude"
+                    className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-2">USER NAME（用户昵称）</label>
+                  <input
+                    type="text"
+                    value={currentSessionConfig.user_name || ''}
+                    onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, user_name: e.target.value})}
+                    placeholder="我"
+                    className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                  />
+                </div>
+              </div>
+
+              {/* 用户设定 */}
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">用户设定 USER</label>
+                <textarea
+                  value={currentSessionConfig.user_setting || ''}
+                  onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, user_setting: e.target.value})}
+                  placeholder="描述用户的性格、喜好、背景等信息..."
+                  rows={4}
+                  className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574] resize-none"
+                />
+              </div>
+
+              {/* 人物设定 */}
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">人物设定 PERSONAL</label>
+                <textarea
+                  value={currentSessionConfig.character_setting || ''}
+                  onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, character_setting: e.target.value})}
+                  placeholder="描述AI角色的性格、说话方式、行为习惯等..."
+                  rows={4}
+                  className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574] resize-none"
+                />
+              </div>
+
+              {/* 世界书 */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm text-gray-300">世界书</label>
+                  <button
+                    onClick={addWorldBookEntry}
+                    className="px-3 py-1 bg-[#D4A574] hover:bg-[#C39564] rounded text-sm text-white transition-colors"
+                  >
+                    + 添加
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  {worldBook.map(entry => (
+                    <div key={entry.id} className="p-3 bg-[#1A1A1A] rounded-lg">
+                      {editingWorldBook?.id === entry.id ? (
+                        <div className="space-y-2">
+                          <input
+                            type="text"
+                            value={editingWorldBook.name}
+                            onChange={(e) => setEditingWorldBook({...editingWorldBook, name: e.target.value})}
+                            placeholder="名称"
+                            className="w-full px-3 py-2 bg-[#2A2A2A] border border-white/10 rounded text-gray-200 outline-none focus:border-[#D4A574]"
+                          />
+                          <textarea
+                            value={editingWorldBook.content}
+                            onChange={(e) => setEditingWorldBook({...editingWorldBook, content: e.target.value})}
+                            placeholder="内容"
+                            rows={3}
+                            className="w-full px-3 py-2 bg-[#2A2A2A] border border-white/10 rounded text-gray-200 outline-none focus:border-[#D4A574] resize-none"
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              onClick={() => saveWorldBookEntry(editingWorldBook)}
+                              className="px-3 py-1 bg-[#D4A574] hover:bg-[#C39564] rounded text-sm text-white transition-colors"
+                            >
+                              保存
+                            </button>
+                            <button
+                              onClick={() => setEditingWorldBook(null)}
+                              className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded text-sm text-gray-300 transition-colors"
+                            >
+                              取消
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div className="flex items-center justify-between mb-1">
+                            <div className="font-medium text-gray-200">{entry.name}</div>
+                            <div className="flex gap-1">
+                              <button
+                                onClick={() => setEditingWorldBook(entry)}
+                                className="p-1 hover:bg-white/10 rounded"
+                              >
+                                <Edit size={14} className="text-gray-400" />
+                              </button>
+                              <button
+                                onClick={() => deleteWorldBookEntry(entry.id)}
+                                className="p-1 hover:bg-white/10 rounded"
+                              >
+                                <Trash size={14} className="text-gray-400" />
+                              </button>
+                            </div>
+                          </div>
+                          <div className="text-sm text-gray-400">{entry.content}</div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  {editingWorldBook?.isNew && (
+                    <div className="p-3 bg-[#1A1A1A] rounded-lg space-y-2">
+                      <input
+                        type="text"
+                        value={editingWorldBook.name}
+                        onChange={(e) => setEditingWorldBook({...editingWorldBook, name: e.target.value})}
+                        placeholder="名称"
+                        className="w-full px-3 py-2 bg-[#2A2A2A] border border-white/10 rounded text-gray-200 outline-none focus:border-[#D4A574]"
+                      />
+                      <textarea
+                        value={editingWorldBook.content}
+                        onChange={(e) => setEditingWorldBook({...editingWorldBook, content: e.target.value})}
+                        placeholder="内容"
+                        rows={3}
+                        className="w-full px-3 py-2 bg-[#2A2A2A] border border-white/10 rounded text-gray-200 outline-none focus:border-[#D4A574] resize-none"
+                      />
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => saveWorldBookEntry(editingWorldBook)}
+                          className="px-3 py-1 bg-[#D4A574] hover:bg-[#C39564] rounded text-sm text-white transition-colors"
+                        >
+                          保存
+                        </button>
+                        <button
+                          onClick={() => setEditingWorldBook(null)}
+                          className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded text-sm text-gray-300 transition-colors"
+                        >
+                          取消
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                  {worldBook.length === 0 && !editingWorldBook && (
+                    <div className="text-center text-gray-500 py-4">暂无世界书条目</div>
+                  )}
+                </div>
+              </div>
+
+              {/* 回复条数 */}
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">回复条数</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="number"
+                    min="1"
+                    value={currentSessionConfig.min_reply_count || 1}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      if (val <= currentSessionConfig.max_reply_count) {
+                        setCurrentSessionConfig({...currentSessionConfig, min_reply_count: val});
+                      }
+                    }}
+                    className="w-20 px-3 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                  />
+                  <span className="text-gray-400">-</span>
+                  <input
+                    type="number"
+                    min="1"
+                    value={currentSessionConfig.max_reply_count || 5}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value);
+                      if (val >= currentSessionConfig.min_reply_count) {
+                        setCurrentSessionConfig({...currentSessionConfig, max_reply_count: val});
+                      }
+                    }}
+                    className="w-20 px-3 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                  />
+                </div>
+              </div>
+
+              {/* 时间感知 */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={currentSessionConfig.time_awareness || false}
+                    onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, time_awareness: e.target.checked})}
+                    className="w-4 h-4 rounded border-white/10 bg-[#1A1A1A] text-[#D4A574] focus:ring-[#D4A574]"
+                  />
+                  <span className="text-sm text-gray-300">时间感知 TIME</span>
+                </label>
+                <div className="text-xs text-gray-500 mt-1 ml-6">
+                  勾选后，AI 将感知系统时间并据此调整回复逻辑
+                </div>
+              </div>
+
+              {/* 记忆条数 */}
+              <div>
+                <label className="block text-sm text-gray-300 mb-2">记忆条数 MEMORY COUNT</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={currentSessionConfig.memory_count || ''}
+                  onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, memory_count: e.target.value ? parseInt(e.target.value) : null})}
+                  placeholder="留空表示记忆全部对话"
+                  className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                />
+                <div className="text-xs text-gray-500 mt-1">
+                  设置 AI 回复时参考的最近对话条数（包含双方消息）
+                </div>
+              </div>
+
+              {/* 记忆总结 */}
+              <div>
+                <label className="flex items-center gap-2 cursor-pointer mb-3">
+                  <input
+                    type="checkbox"
+                    checked={currentSessionConfig.memory_summary_enabled || false}
+                    onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, memory_summary_enabled: e.target.checked})}
+                    className="w-4 h-4 rounded border-white/10 bg-[#1A1A1A] text-[#D4A574] focus:ring-[#D4A574]"
+                  />
+                  <span className="text-sm text-gray-300">记忆总结 MEMORY CORE</span>
+                </label>
+                
+                {currentSessionConfig.memory_summary_enabled && (
+                  <div className="space-y-3 ml-6">
+                    <div className="flex items-center gap-2 text-sm text-gray-400">
+                      <span>每</span>
+                      <input
+                        type="number"
+                        min="1"
+                        value={currentSessionConfig.memory_summary_interval || 10}
+                        onChange={(e) => setCurrentSessionConfig({...currentSessionConfig, memory_summary_interval: parseInt(e.target.value)})}
+                        className="w-16 px-2 py-1 bg-[#1A1A1A] border border-white/10 rounded text-gray-200 outline-none focus:border-[#D4A574]"
+                      />
+                      <span>轮对话自动总结一次</span>
+                    </div>
+                    
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <div className="text-sm text-gray-400">已有总结</div>
+                        {memorySummaries.length > 0 && (
+                          <button
+                            onClick={deleteAllSummaries}
+                            className="text-xs text-red-400 hover:text-red-300 transition-colors"
+                          >
+                            清空全部
+                          </button>
+                        )}
+                      </div>
+                      <div className="space-y-2 max-h-48 overflow-y-auto">
+                        {memorySummaries.map(summary => (
+                          <div key={summary.id} className="p-3 bg-[#1A1A1A] rounded-lg">
+                            {editingSummary?.id === summary.id ? (
+                              <div className="space-y-2">
+                                <textarea
+                                  value={editingSummary.summary}
+                                  onChange={(e) => setEditingSummary({...editingSummary, summary: e.target.value})}
+                                  rows={3}
+                                  className="w-full px-3 py-2 bg-[#2A2A2A] border border-white/10 rounded text-gray-200 text-sm outline-none focus:border-[#D4A574] resize-none"
+                                />
+                                <div className="flex gap-2">
+                                  <button
+                                    onClick={() => saveSummary(editingSummary)}
+                                    className="px-3 py-1 bg-[#D4A574] hover:bg-[#C39564] rounded text-xs text-white transition-colors"
+                                  >
+                                    保存
+                                  </button>
+                                  <button
+                                    onClick={() => setEditingSummary(null)}
+                                    className="px-3 py-1 bg-white/5 hover:bg-white/10 rounded text-xs text-gray-300 transition-colors"
+                                  >
+                                    取消
+                                  </button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div>
+                                <div className="flex items-start justify-between gap-2 mb-1">
+                                  <div className="text-xs text-gray-500">
+                                    {new Date(summary.created_at).toLocaleString('zh-CN')}
+                                  </div>
+                                  <div className="flex gap-1">
+                                    <button
+                                      onClick={() => setEditingSummary(summary)}
+                                      className="p-1 hover:bg-white/10 rounded"
+                                    >
+                                      <Edit size={12} className="text-gray-400" />
+                                    </button>
+                                    <button
+                                      onClick={() => deleteSummary(summary.id)}
+                                      className="p-1 hover:bg-white/10 rounded"
+                                    >
+                                      <Trash size={12} className="text-gray-400" />
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="text-sm text-gray-300">{summary.summary}</div>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {memorySummaries.length === 0 && (
+                          <div className="text-center text-gray-500 py-4 text-sm">暂无记忆总结</div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 清除聊天记录 */}
+              <div>
+                <button
+                  onClick={clearAllMessages}
+                  className="w-full px-4 py-3 bg-red-500/10 hover:bg-red-500/20 rounded-lg text-red-400 font-medium transition-colors"
+                >
+                  清除所有聊天记录
+                </button>
+                <div className="text-xs text-gray-500 mt-1 text-center">
+                  此操作不可恢复，请谨慎操作
+                </div>
+              </div>
+            </div>
+
+            {/* 底部按钮 */}
+            <div className="p-6 border-t border-white/5 flex gap-3 sticky bottom-0 bg-[#2A2A2A]">
+              <button
+                onClick={() => setShowSessionConfig(false)}
+                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={saveSessionConfig}
+                className="flex-1 px-4 py-2 bg-[#D4A574] hover:bg-[#C39564] rounded-lg text-white transition-colors"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 应用列表弹窗 */}
       {showApps && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
@@ -548,7 +1208,7 @@ const ChatInterface = () => {
         </div>
       )}
 
-      {/* 设置弹窗 */}
+      {/* 系统设置弹窗 */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-[#2A2A2A] rounded-xl w-full max-w-2xl max-h-[90vh] border border-white/10 flex flex-col">
