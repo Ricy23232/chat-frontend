@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, ChevronUp, X, RefreshCw, Edit2, Trash2, Brain } from 'lucide-react';
+import { Send, Plus, Settings, Menu, X, RefreshCw, Edit2, Trash2, Brain, Grid } from 'lucide-react';
 
 const API_BASE_URL = 'https://chat-backend-wsuj.onrender.com';
 
@@ -9,9 +9,9 @@ const ChatInterface = () => {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isPlayerExpanded, setIsPlayerExpanded] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [showApps, setShowApps] = useState(false);
+  const [showSidebar, setShowSidebar] = useState(true);
   const [settingsTab, setSettingsTab] = useState('api');
   const [isTesting, setIsTesting] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
@@ -21,10 +21,6 @@ const ChatInterface = () => {
   const [editingName, setEditingName] = useState('');
   const [expandedThinking, setExpandedThinking] = useState({});
   const [systemSettings, setSystemSettings] = useState(null);
-  const [currentSong] = useState({
-    name: '夜的第七章',
-    artist: '周杰伦'
-  });
   
   const [apiConfig, setApiConfig] = useState(() => {
     const saved = localStorage.getItem('apiConfig');
@@ -47,6 +43,14 @@ const ChatInterface = () => {
 
   useEffect(() => {
     loadSessions();
+    
+    // 响应式处理：小屏幕默认隐藏侧边栏
+    const handleResize = () => {
+      setShowSidebar(window.innerWidth >= 768);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   const formatTime = (timestamp) => {
@@ -111,6 +115,11 @@ const ChatInterface = () => {
   const switchSession = async (sessionId) => {
     setCurrentSessionId(sessionId);
     
+    // 移动端切换会话后自动隐藏侧边栏
+    if (window.innerWidth < 768) {
+      setShowSidebar(false);
+    }
+    
     try {
       const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/messages`);
       if (!response.ok) throw new Error('加载消息失败');
@@ -139,6 +148,11 @@ const ChatInterface = () => {
       setSessions(prev => [session, ...prev]);
       setCurrentSessionId(session.id);
       setMessages([]);
+      
+      // 移动端创建后自动隐藏侧边栏
+      if (window.innerWidth < 768) {
+        setShowSidebar(false);
+      }
     } catch (error) {
       console.error('创建会话失败:', error);
     }
@@ -314,14 +328,21 @@ const ChatInterface = () => {
 
   return (
     <div className="h-screen flex bg-[#1A1A1A]">
-      <div className="w-64 bg-[#2A2A2A] flex flex-col border-r border-white/5">
-        <div className="p-4 border-b border-white/5">
+      {/* 侧边栏 */}
+      <div className={`${showSidebar ? 'translate-x-0' : '-translate-x-full'} fixed md:relative w-64 h-full bg-[#2A2A2A] flex flex-col border-r border-white/5 transition-transform duration-300 z-30`}>
+        <div className="p-4 border-b border-white/5 flex items-center justify-between">
           <button 
             onClick={createNewSession}
-            className="w-full flex items-center gap-2 px-4 py-2 bg-[#D4A574] text-white rounded-lg hover:bg-[#C39564] transition-colors"
+            className="flex-1 flex items-center gap-2 px-4 py-2 bg-[#D4A574] text-white rounded-lg hover:bg-[#C39564] transition-colors"
           >
             <Plus size={18} />
             <span>新对话</span>
+          </button>
+          <button 
+            onClick={() => setShowSidebar(false)}
+            className="md:hidden ml-2 p-2 hover:bg-white/5 rounded-lg transition-colors text-gray-400"
+          >
+            <X size={20} />
           </button>
         </div>
         
@@ -400,20 +421,37 @@ const ChatInterface = () => {
         </div>
       </div>
 
+      {/* 主内容区 */}
       <div className="flex-1 flex flex-col relative">
-        <div className="h-16 flex items-center justify-between px-6 bg-[#2A2A2A] border-b border-white/5">
-          <div className="text-gray-200">
-            {sessions.find(s => s.id === currentSessionId)?.name || 'Claude'}
+        <div className="h-16 flex items-center justify-between px-4 md:px-6 bg-[#2A2A2A] border-b border-white/5">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={() => setShowSidebar(true)}
+              className="md:hidden p-2 hover:bg-white/5 rounded-lg transition-colors text-gray-400"
+            >
+              <Menu size={20} />
+            </button>
+            <div className="text-gray-200">
+              {sessions.find(s => s.id === currentSessionId)?.name || 'Claude'}
+            </div>
           </div>
-          <div className="text-sm text-gray-400">
-            {apiConfig.model || '未配置'}
+          <div className="flex items-center gap-2">
+            <div className="hidden md:block text-sm text-gray-400">
+              {apiConfig.model || '未配置'}
+            </div>
+            <button
+              onClick={() => setShowApps(true)}
+              className="p-2 hover:bg-white/5 rounded-lg transition-colors text-gray-400"
+            >
+              <Grid size={20} />
+            </button>
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+        <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 space-y-4">
           {messages.map((msg, i) => (
             <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-              <div className={`max-w-[70%] px-4 py-3 rounded-2xl whitespace-pre-wrap ${
+              <div className={`max-w-[85%] md:max-w-[70%] px-4 py-3 rounded-2xl whitespace-pre-wrap text-sm md:text-base ${
                 msg.role === 'user' 
                   ? 'bg-[#D4A574] text-white' 
                   : 'bg-[#2A2A2A] text-gray-200'
@@ -422,7 +460,7 @@ const ChatInterface = () => {
               </div>
               
               {msg.reasoning_content && (
-                <div className="max-w-[70%] mt-2">
+                <div className="max-w-[85%] md:max-w-[70%] mt-2">
                   <button
                     onClick={() => setExpandedThinking({...expandedThinking, [i]: !expandedThinking[i]})}
                     className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
@@ -445,7 +483,7 @@ const ChatInterface = () => {
           ))}
           {isLoading && (
             <div className="flex justify-start">
-              <div className="max-w-[70%] px-4 py-3 rounded-2xl bg-[#2A2A2A] text-gray-200">
+              <div className="max-w-[85%] md:max-w-[70%] px-4 py-3 rounded-2xl bg-[#2A2A2A] text-gray-200">
                 <div className="flex gap-1">
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
                   <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
@@ -457,7 +495,7 @@ const ChatInterface = () => {
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="p-6">
+        <div className="p-4 md:p-6">
           <div className="flex items-center gap-3 px-4 py-3 bg-[#2A2A2A] rounded-2xl border border-white/10">
             <input
               type="text"
@@ -466,7 +504,7 @@ const ChatInterface = () => {
               onKeyPress={handleKeyPress}
               placeholder="跟我说说..."
               disabled={isLoading || !currentSessionId}
-              className="flex-1 bg-transparent border-0 outline-none text-gray-200 placeholder-gray-500 disabled:opacity-50"
+              className="flex-1 bg-transparent border-0 outline-none text-gray-200 placeholder-gray-500 disabled:opacity-50 text-sm md:text-base"
             />
             <button 
               onClick={sendMessage}
@@ -477,69 +515,43 @@ const ChatInterface = () => {
             </button>
           </div>
         </div>
-
-        <div className="absolute bottom-24 right-6 w-80 bg-[#2A2A2A] rounded-xl shadow-2xl border border-white/10 overflow-hidden">
-          <div 
-            className="flex items-center justify-between p-3 bg-[#1A1A1A] cursor-pointer"
-            onClick={() => setIsPlayerExpanded(!isPlayerExpanded)}
-          >
-            <div className="flex items-center gap-2">
-              <Music size={16} className="text-[#D4A574]" />
-              <span className="text-sm text-gray-300">电台</span>
-            </div>
-            {isPlayerExpanded ? 
-              <ChevronDown size={16} className="text-gray-400" /> : 
-              <ChevronUp size={16} className="text-gray-400" />
-            }
-          </div>
-
-          {isPlayerExpanded && (
-            <div className="p-4">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-14 h-14 rounded-lg bg-[#1A1A1A] flex items-center justify-center">
-                  <Music size={24} className="text-gray-600" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm text-gray-200 truncate">{currentSong.name}</div>
-                  <div className="text-xs text-gray-400 truncate">{currentSong.artist}</div>
-                </div>
-              </div>
-
-              <div className="mb-4">
-                <div className="h-1 bg-white/10 rounded-full overflow-hidden">
-                  <div className="h-full w-1/3 bg-[#D4A574]"></div>
-                </div>
-                <div className="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>1:23</span>
-                  <span>4:15</span>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-center gap-4">
-                <button className="p-2 hover:bg-white/5 rounded-lg transition-colors">
-                  <SkipForward size={18} className="text-gray-400 rotate-180" />
-                </button>
-                <button 
-                  className="p-3 bg-[#D4A574] hover:bg-[#C39564] rounded-full transition-colors"
-                  onClick={() => setIsPlaying(!isPlaying)}
-                >
-                  {isPlaying ? 
-                    <Pause size={20} className="text-white" /> : 
-                    <Play size={20} className="text-white" />
-                  }
-                </button>
-                <button className="p-2 hover:bg-white/5 rounded-lg transition-colors">
-                  <SkipForward size={18} className="text-gray-400" />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
       </div>
 
+      {/* 移动端侧边栏遮罩 */}
+      {showSidebar && (
+        <div 
+          className="md:hidden fixed inset-0 bg-black/50 z-20"
+          onClick={() => setShowSidebar(false)}
+        />
+      )}
+
+      {/* 应用列表弹窗 */}
+      {showApps && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#2A2A2A] rounded-xl w-full max-w-md border border-white/10">
+            <div className="flex items-center justify-between p-6 border-b border-white/5">
+              <h2 className="text-xl text-gray-200">应用</h2>
+              <button 
+                onClick={() => setShowApps(false)}
+                className="p-1 hover:bg-white/5 rounded-lg transition-colors"
+              >
+                <X size={20} className="text-gray-400" />
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="text-center text-gray-400 py-8">
+                暂无应用
+                <div className="text-sm mt-2">之后可以在这里添加音乐、日记、待办等功能</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 设置弹窗 */}
       {showSettings && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[#2A2A2A] rounded-xl w-[600px] max-w-[90vw] max-h-[80vh] border border-white/10 flex flex-col">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#2A2A2A] rounded-xl w-full max-w-2xl max-h-[90vh] border border-white/10 flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-white/5">
               <h2 className="text-xl text-gray-200">设置</h2>
               <button 
@@ -658,7 +670,7 @@ const ChatInterface = () => {
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm text-gray-300 mb-2">温度 (0-1)</label>
                         <input
@@ -684,7 +696,7 @@ const ChatInterface = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div>
                         <label className="block text-sm text-gray-300 mb-2">压缩阈值 (tokens)</label>
                         <input
