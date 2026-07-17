@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, ChevronUp, X } from 'lucide-react';
+import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, ChevronUp, X, RefreshCw } from 'lucide-react';
 
 const API_BASE_URL = 'https://chat-backend-wsuj.onrender.com';
 
@@ -12,19 +12,22 @@ const ChatInterface = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
+  const [isLoadingModels, setIsLoadingModels] = useState(false);
+  const [availableModels, setAvailableModels] = useState([]);
+  const [testResult, setTestResult] = useState(null);
   const [currentSong, setCurrentSong] = useState({
     name: '夜的第七章',
     artist: '周杰伦',
     cover: 'https://via.placeholder.com/60'
   });
   
-  // API 配置
   const [apiConfig, setApiConfig] = useState(() => {
     const saved = localStorage.getItem('apiConfig');
     return saved ? JSON.parse(saved) : {
       baseUrl: '',
       apiKey: '',
-      model: 'gpt-3.5-turbo'
+      model: ''
     };
   });
   
@@ -38,9 +41,76 @@ const ChatInterface = () => {
     scrollToBottom();
   }, [messages]);
 
+  const fetchModels = async () => {
+    if (!apiConfig.baseUrl || !apiConfig.apiKey) {
+      alert('请先填写 API 地址和 API Key');
+      return;
+    }
+
+    setIsLoadingModels(true);
+    setTestResult(null);
+    
+    try {
+      const response = await fetch(`${apiConfig.baseUrl}/models`, {
+        headers: {
+          'Authorization': `Bearer ${apiConfig.apiKey}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('获取模型列表失败');
+      }
+
+      const data = await response.json();
+      const models = data.data.map(m => m.id);
+      setAvailableModels(models);
+      setTestResult({ success: true, message: `成功获取 ${models.length} 个模型` });
+    } catch (error) {
+      console.error('获取模型失败:', error);
+      setTestResult({ success: false, message: '获取模型列表失败，请检查 API 配置' });
+    } finally {
+      setIsLoadingModels(false);
+    }
+  };
+
+  const testConnection = async () => {
+    if (!apiConfig.baseUrl || !apiConfig.apiKey) {
+      alert('请先填写 API 地址和 API Key');
+      return;
+    }
+
+    setIsTesting(true);
+    setTestResult(null);
+    
+    try {
+      const response = await fetch(`${apiConfig.baseUrl}/models`, {
+        headers: {
+          'Authorization': `Bearer ${apiConfig.apiKey}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('连接失败');
+      }
+
+      setTestResult({ success: true, message: '连接成功！API 配置正确' });
+    } catch (error) {
+      console.error('测试连接失败:', error);
+      setTestResult({ success: false, message: '连接失败，请检查 API 地址和 Key 是否正确' });
+    } finally {
+      setIsTesting(false);
+    }
+  };
+
   const saveApiConfig = () => {
+    if (!apiConfig.baseUrl || !apiConfig.apiKey || !apiConfig.model) {
+      alert('请填写完整的 API 配置');
+      return;
+    }
+    
     localStorage.setItem('apiConfig', JSON.stringify(apiConfig));
     setShowSettings(false);
+    setTestResult(null);
   };
 
   const sendMessage = async () => {
@@ -96,7 +166,6 @@ const ChatInterface = () => {
 
   return (
     <div className="h-screen flex bg-[#1A1A1A]">
-      {/* 侧边栏 */}
       <div className="w-64 bg-[#2A2A2A] flex flex-col border-r border-white/5">
         <div className="p-4 border-b border-white/5">
           <button className="w-full flex items-center gap-2 px-4 py-2 bg-[#D4A574] text-white rounded-lg hover:bg-[#C39564] transition-colors">
@@ -122,7 +191,6 @@ const ChatInterface = () => {
         </div>
       </div>
 
-      {/* 主聊天区域 */}
       <div className="flex-1 flex flex-col relative">
         <div className="h-16 flex items-center justify-between px-6 bg-[#2A2A2A] border-b border-white/5">
           <div className="text-gray-200">Claude</div>
@@ -178,7 +246,6 @@ const ChatInterface = () => {
           </div>
         </div>
 
-        {/* 音乐播放器 */}
         <div className="absolute bottom-24 right-6 w-80 bg-[#2A2A2A] rounded-xl shadow-2xl border border-white/10 overflow-hidden">
           <div 
             className="flex items-center justify-between p-3 bg-[#1A1A1A] cursor-pointer"
@@ -238,14 +305,16 @@ const ChatInterface = () => {
         </div>
       </div>
 
-      {/* 设置面板 */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
           <div className="bg-[#2A2A2A] rounded-xl w-[500px] max-w-[90vw] border border-white/10">
             <div className="flex items-center justify-between p-6 border-b border-white/5">
               <h2 className="text-xl text-gray-200">API 设置</h2>
               <button 
-                onClick={() => setShowSettings(false)}
+                onClick={() => {
+                  setShowSettings(false);
+                  setTestResult(null);
+                }}
                 className="p-1 hover:bg-white/5 rounded-lg transition-colors"
               >
                 <X size={20} className="text-gray-400" />
@@ -276,29 +345,60 @@ const ChatInterface = () => {
               </div>
 
               <div>
-                <label className="block text-sm text-gray-300 mb-2">模型</label>
-                <input
-                  type="text"
-                  value={apiConfig.model}
-                  onChange={(e) => setApiConfig({...apiConfig, model: e.target.value})}
-                  placeholder="gpt-3.5-turbo / claude-3.5-sonnet / deepseek-chat"
-                  className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
-                />
+                <div className="flex items-center justify-between mb-2">
+                  <label className="block text-sm text-gray-300">模型</label>
+                  <button
+                    onClick={fetchModels}
+                    disabled={isLoadingModels}
+                    className="flex items-center gap-1 text-sm text-[#D4A574] hover:text-[#C39564] disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={isLoadingModels ? 'animate-spin' : ''} />
+                    <span>获取列表</span>
+                  </button>
+                </div>
+                
+                {availableModels.length > 0 ? (
+                  <select
+                    value={apiConfig.model}
+                    onChange={(e) => setApiConfig({...apiConfig, model: e.target.value})}
+                    className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                  >
+                    <option value="">选择模型</option>
+                    {availableModels.map(model => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    value={apiConfig.model}
+                    onChange={(e) => setApiConfig({...apiConfig, model: e.target.value})}
+                    placeholder="claude-3.5-sonnet / gpt-4 / deepseek-chat"
+                    className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                  />
+                )}
               </div>
+
+              {testResult && (
+                <div className={`p-3 rounded-lg ${testResult.success ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                  {testResult.message}
+                </div>
+              )}
             </div>
 
             <div className="p-6 border-t border-white/5 flex gap-3">
               <button
-                onClick={() => setShowSettings(false)}
-                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors"
+                onClick={testConnection}
+                disabled={isTesting}
+                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors disabled:opacity-50"
               >
-                取消
+                {isTesting ? '测试中...' : '测试连接'}
               </button>
               <button
                 onClick={saveApiConfig}
                 className="flex-1 px-4 py-2 bg-[#D4A574] hover:bg-[#C39564] rounded-lg text-white transition-colors"
               >
-                保存
+                保存 API 配置
               </button>
             </div>
           </div>
