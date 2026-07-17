@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, ChevronUp, X, RefreshCw, MoreVertical, Trash2, Edit2 } from 'lucide-react';
+import { Send, Plus, Settings, Music, Play, Pause, SkipForward, ChevronDown, ChevronUp, X, RefreshCw, Edit2, Trash2, Brain } from 'lucide-react';
 
 const API_BASE_URL = 'https://chat-backend-wsuj.onrender.com';
 
@@ -12,16 +12,18 @@ const ChatInterface = () => {
   const [isPlaying, setIsPlaying] = useState(false);
   const [isPlayerExpanded, setIsPlayerExpanded] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState('api');
   const [isTesting, setIsTesting] = useState(false);
   const [isLoadingModels, setIsLoadingModels] = useState(false);
   const [availableModels, setAvailableModels] = useState([]);
   const [testResult, setTestResult] = useState(null);
   const [editingSessionId, setEditingSessionId] = useState(null);
   const [editingName, setEditingName] = useState('');
-  const [currentSong, setCurrentSong] = useState({
+  const [expandedThinking, setExpandedThinking] = useState({});
+  const [systemSettings, setSystemSettings] = useState(null);
+  const [currentSong] = useState({
     name: '夜的第七章',
-    artist: '周杰伦',
-    cover: 'https://via.placeholder.com/60'
+    artist: '周杰伦'
   });
   
   const [apiConfig, setApiConfig] = useState(() => {
@@ -43,10 +45,50 @@ const ChatInterface = () => {
     scrollToBottom();
   }, [messages]);
 
-  // 组件挂载时加载会话列表
   useEffect(() => {
     loadSessions();
   }, []);
+
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = now - date;
+    
+    if (diff < 60000) return '刚刚';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`;
+    if (diff < 86400000) return date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const loadSystemSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings`);
+      if (!response.ok) throw new Error('加载设置失败');
+      const data = await response.json();
+      setSystemSettings(data);
+    } catch (error) {
+      console.error('加载设置失败:', error);
+    }
+  };
+
+  const saveSystemSettings = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/settings`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(systemSettings),
+      });
+
+      if (!response.ok) throw new Error('保存设置失败');
+      alert('设置已保存');
+    } catch (error) {
+      console.error('保存设置失败:', error);
+      alert('保存失败');
+    }
+  };
 
   const loadSessions = async () => {
     try {
@@ -56,9 +98,10 @@ const ChatInterface = () => {
       const data = await response.json();
       setSessions(data);
       
-      // 如果有会话，自动选中第一个
-      if (data.length > 0 && !currentSessionId) {
+      if (data.length > 0) {
         switchSession(data[0].id);
+      } else {
+        createNewSession();
       }
     } catch (error) {
       console.error('加载会话失败:', error);
@@ -68,7 +111,6 @@ const ChatInterface = () => {
   const switchSession = async (sessionId) => {
     setCurrentSessionId(sessionId);
     
-    // 加载该会话的消息
     try {
       const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}/messages`);
       if (!response.ok) throw new Error('加载消息失败');
@@ -123,7 +165,7 @@ const ChatInterface = () => {
   };
 
   const deleteSession = async (sessionId) => {
-    if (!confirm('确定删除这个会话吗？')) return;
+    if (!window.confirm('确定删除这个会话吗？')) return;
     
     try {
       const response = await fetch(`${API_BASE_URL}/api/sessions/${sessionId}`, {
@@ -132,15 +174,14 @@ const ChatInterface = () => {
 
       if (!response.ok) throw new Error('删除失败');
 
-      setSessions(prev => prev.filter(s => s.id !== sessionId));
+      const newSessions = sessions.filter(s => s.id !== sessionId);
+      setSessions(newSessions);
       
       if (currentSessionId === sessionId) {
-        const remaining = sessions.filter(s => s.id !== sessionId);
-        if (remaining.length > 0) {
-          switchSession(remaining[0].id);
+        if (newSessions.length > 0) {
+          switchSession(newSessions[0].id);
         } else {
-          setCurrentSessionId(null);
-          setMessages([]);
+          createNewSession();
         }
       }
     } catch (error) {
@@ -228,7 +269,7 @@ const ChatInterface = () => {
     const userMessage = input.trim();
     setInput('');
     
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+    setMessages(prev => [...prev, { role: 'user', content: userMessage, created_at: new Date().toISOString() }]);
     setIsLoading(true);
 
     try {
@@ -246,12 +287,18 @@ const ChatInterface = () => {
       if (!response.ok) throw new Error('网络响应失败');
 
       const data = await response.json();
-      setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+      setMessages(prev => [...prev, { 
+        role: 'assistant', 
+        content: data.reply,
+        reasoning_content: data.reasoning,
+        created_at: new Date().toISOString()
+      }]);
     } catch (error) {
       console.error('发送消息失败:', error);
       setMessages(prev => [...prev, { 
         role: 'assistant', 
-        content: '抱歉，出了点问题。稍后再试？' 
+        content: '抱歉，出了点问题。稍后再试？',
+        created_at: new Date().toISOString()
       }]);
     } finally {
       setIsLoading(false);
@@ -339,7 +386,12 @@ const ChatInterface = () => {
 
         <div className="p-4 border-t border-white/5">
           <button 
-            onClick={() => setShowSettings(true)}
+            onClick={() => {
+              setShowSettings(true);
+              if (settingsTab === 'system' && !systemSettings) {
+                loadSystemSettings();
+              }
+            }}
             className="w-full flex items-center gap-2 px-4 py-2 hover:bg-white/5 rounded-lg transition-colors text-gray-300"
           >
             <Settings size={18} />
@@ -360,13 +412,34 @@ const ChatInterface = () => {
 
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
           {messages.map((msg, i) => (
-            <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-[70%] px-4 py-3 rounded-2xl ${
+            <div key={i} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+              <div className={`max-w-[70%] px-4 py-3 rounded-2xl whitespace-pre-wrap ${
                 msg.role === 'user' 
                   ? 'bg-[#D4A574] text-white' 
                   : 'bg-[#2A2A2A] text-gray-200'
               }`}>
                 {msg.content}
+              </div>
+              
+              {msg.reasoning_content && (
+                <div className="max-w-[70%] mt-2">
+                  <button
+                    onClick={() => setExpandedThinking({...expandedThinking, [i]: !expandedThinking[i]})}
+                    className="flex items-center gap-2 text-sm text-gray-400 hover:text-gray-300 transition-colors"
+                  >
+                    <Brain size={14} />
+                    <span>{expandedThinking[i] ? '收起' : '查看'}思考过程</span>
+                  </button>
+                  {expandedThinking[i] && (
+                    <div className="mt-2 px-4 py-3 bg-[#1A1A1A] rounded-lg text-sm text-gray-400 whitespace-pre-wrap">
+                      {msg.reasoning_content}
+                    </div>
+                  )}
+                </div>
+              )}
+              
+              <div className="text-xs text-gray-500 mt-1">
+                {formatTime(msg.created_at)}
               </div>
             </div>
           ))}
@@ -466,9 +539,9 @@ const ChatInterface = () => {
 
       {showSettings && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-[#2A2A2A] rounded-xl w-[500px] max-w-[90vw] border border-white/10">
+          <div className="bg-[#2A2A2A] rounded-xl w-[600px] max-w-[90vw] max-h-[80vh] border border-white/10 flex flex-col">
             <div className="flex items-center justify-between p-6 border-b border-white/5">
-              <h2 className="text-xl text-gray-200">API 设置</h2>
+              <h2 className="text-xl text-gray-200">设置</h2>
               <button 
                 onClick={() => {
                   setShowSettings(false);
@@ -480,85 +553,207 @@ const ChatInterface = () => {
               </button>
             </div>
 
-            <div className="p-6 space-y-4">
-              <div>
-                <label className="block text-sm text-gray-300 mb-2">API 地址</label>
-                <input
-                  type="text"
-                  value={apiConfig.baseUrl}
-                  onChange={(e) => setApiConfig({...apiConfig, baseUrl: e.target.value})}
-                  placeholder="https://api.example.com/v1"
-                  className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
-                />
-              </div>
+            <div className="flex border-b border-white/5">
+              <button
+                onClick={() => setSettingsTab('api')}
+                className={`flex-1 px-4 py-3 text-sm transition-colors ${
+                  settingsTab === 'api'
+                    ? 'text-[#D4A574] border-b-2 border-[#D4A574]'
+                    : 'text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                API 配置
+              </button>
+              <button
+                onClick={() => {
+                  setSettingsTab('system');
+                  if (!systemSettings) loadSystemSettings();
+                }}
+                className={`flex-1 px-4 py-3 text-sm transition-colors ${
+                  settingsTab === 'system'
+                    ? 'text-[#D4A574] border-b-2 border-[#D4A574]'
+                    : 'text-gray-400 hover:text-gray-300'
+                }`}
+              >
+                系统设置
+              </button>
+            </div>
 
-              <div>
-                <label className="block text-sm text-gray-300 mb-2">API Key</label>
-                <input
-                  type="password"
-                  value={apiConfig.apiKey}
-                  onChange={(e) => setApiConfig({...apiConfig, apiKey: e.target.value})}
-                  placeholder="sk-..."
-                  className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
-                />
-              </div>
+            <div className="flex-1 overflow-y-auto p-6">
+              {settingsTab === 'api' ? (
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-2">API 地址</label>
+                    <input
+                      type="text"
+                      value={apiConfig.baseUrl}
+                      onChange={(e) => setApiConfig({...apiConfig, baseUrl: e.target.value})}
+                      placeholder="https://api.example.com/v1"
+                      className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                    />
+                  </div>
 
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <label className="block text-sm text-gray-300">模型</label>
-                  <button
-                    onClick={fetchModels}
-                    disabled={isLoadingModels}
-                    className="flex items-center gap-1 text-sm text-[#D4A574] hover:text-[#C39564] disabled:opacity-50"
-                  >
-                    <RefreshCw size={14} className={isLoadingModels ? 'animate-spin' : ''} />
-                    <span>获取列表</span>
-                  </button>
+                  <div>
+                    <label className="block text-sm text-gray-300 mb-2">API Key</label>
+                    <input
+                      type="password"
+                      value={apiConfig.apiKey}
+                      onChange={(e) => setApiConfig({...apiConfig, apiKey: e.target.value})}
+                      placeholder="sk-..."
+                      className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                    />
+                  </div>
+
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm text-gray-300">模型</label>
+                      <button
+                        onClick={fetchModels}
+                        disabled={isLoadingModels}
+                        className="flex items-center gap-1 text-sm text-[#D4A574] hover:text-[#C39564] disabled:opacity-50"
+                      >
+                        <RefreshCw size={14} className={isLoadingModels ? 'animate-spin' : ''} />
+                        <span>获取列表</span>
+                      </button>
+                    </div>
+                    
+                    {availableModels.length > 0 ? (
+                      <select
+                        value={apiConfig.model}
+                        onChange={(e) => setApiConfig({...apiConfig, model: e.target.value})}
+                        className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                      >
+                        <option value="">选择模型</option>
+                        {availableModels.map(model => (
+                          <option key={model} value={model}>{model}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={apiConfig.model}
+                        onChange={(e) => setApiConfig({...apiConfig, model: e.target.value})}
+                        placeholder="claude-3-5-sonnet-20241022"
+                        className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                      />
+                    )}
+                  </div>
+
+                  {testResult && (
+                    <div className={`p-3 rounded-lg ${testResult.success ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
+                      {testResult.message}
+                    </div>
+                  )}
                 </div>
-                
-                {availableModels.length > 0 ? (
-                  <select
-                    value={apiConfig.model}
-                    onChange={(e) => setApiConfig({...apiConfig, model: e.target.value})}
-                    className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
-                  >
-                    <option value="">选择模型</option>
-                    {availableModels.map(model => (
-                      <option key={model} value={model}>{model}</option>
-                    ))}
-                  </select>
+              ) : (
+                systemSettings ? (
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">系统提示词</label>
+                      <textarea
+                        value={systemSettings.system_prompt}
+                        onChange={(e) => setSystemSettings({...systemSettings, system_prompt: e.target.value})}
+                        rows={6}
+                        className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574] resize-none"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">温度 (0-1)</label>
+                        <input
+                          type="number"
+                          min="0"
+                          max="1"
+                          step="0.1"
+                          value={systemSettings.temperature}
+                          onChange={(e) => setSystemSettings({...systemSettings, temperature: parseFloat(e.target.value)})}
+                          className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">上下文轮数</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={systemSettings.max_context_rounds}
+                          onChange={(e) => setSystemSettings({...systemSettings, max_context_rounds: parseInt(e.target.value)})}
+                          className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">压缩阈值 (tokens)</label>
+                        <input
+                          type="number"
+                          min="1000"
+                          step="1000"
+                          value={systemSettings.compress_threshold}
+                          onChange={(e) => setSystemSettings({...systemSettings, compress_threshold: parseInt(e.target.value)})}
+                          className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-sm text-gray-300 mb-2">压缩后保留轮数</label>
+                        <input
+                          type="number"
+                          min="1"
+                          value={systemSettings.compress_keep_rounds}
+                          onChange={(e) => setSystemSettings({...systemSettings, compress_keep_rounds: parseInt(e.target.value)})}
+                          className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm text-gray-300 mb-2">最大回复 tokens</label>
+                      <input
+                        type="number"
+                        min="100"
+                        step="100"
+                        value={systemSettings.max_reply_tokens}
+                        onChange={(e) => setSystemSettings({...systemSettings, max_reply_tokens: parseInt(e.target.value)})}
+                        className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
+                      />
+                    </div>
+                  </div>
                 ) : (
-                  <input
-                    type="text"
-                    value={apiConfig.model}
-                    onChange={(e) => setApiConfig({...apiConfig, model: e.target.value})}
-                    placeholder="claude-3.5-sonnet / gpt-4 / deepseek-chat"
-                    className="w-full px-4 py-2 bg-[#1A1A1A] border border-white/10 rounded-lg text-gray-200 outline-none focus:border-[#D4A574]"
-                  />
-                )}
-              </div>
-
-              {testResult && (
-                <div className={`p-3 rounded-lg ${testResult.success ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
-                  {testResult.message}
-                </div>
+                  <div className="flex items-center justify-center h-32 text-gray-400">
+                    加载中...
+                  </div>
+                )
               )}
             </div>
 
             <div className="p-6 border-t border-white/5 flex gap-3">
-              <button
-                onClick={testConnection}
-                disabled={isTesting}
-                className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors disabled:opacity-50"
-              >
-                {isTesting ? '测试中...' : '测试连接'}
-              </button>
-              <button
-                onClick={saveApiConfig}
-                className="flex-1 px-4 py-2 bg-[#D4A574] hover:bg-[#C39564] rounded-lg text-white transition-colors"
-              >
-                保存 API 配置
-              </button>
+              {settingsTab === 'api' ? (
+                <>
+                  <button
+                    onClick={testConnection}
+                    disabled={isTesting}
+                    className="flex-1 px-4 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-gray-300 transition-colors disabled:opacity-50"
+                  >
+                    {isTesting ? '测试中...' : '测试连接'}
+                  </button>
+                  <button
+                    onClick={saveApiConfig}
+                    className="flex-1 px-4 py-2 bg-[#D4A574] hover:bg-[#C39564] rounded-lg text-white transition-colors"
+                  >
+                    保存 API 配置
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={saveSystemSettings}
+                  className="flex-1 px-4 py-2 bg-[#D4A574] hover:bg-[#C39564] rounded-lg text-white transition-colors"
+                >
+                  保存系统设置
+                </button>
+              )}
             </div>
           </div>
         </div>
